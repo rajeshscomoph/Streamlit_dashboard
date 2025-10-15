@@ -1,0 +1,10 @@
+D:/Streamlit_dashboard/.venv/Scripts/activate.bat
+streamlit run Dashboard.py
+
+
+xcopy "D:\Dr Folder\Department Projects\2025 - Projects Dashboard\Final Data\*" "D:\Streamlit_dashboard\pages\data\" /s /i /y
+
+
+python myupload.py --dir "D:\comophdata\002 PEC\01 Final Data\All CSV files"
+
+
