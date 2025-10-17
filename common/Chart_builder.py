@@ -2,7 +2,7 @@ import hashlib
 import pandas as pd
 import plotly.express as px
 from plotly.graph_objects import Figure
-from typing import Optional, List, Tuple, Callable, Iterable, Dict
+from typing import Optional, List, Tuple, Callable
 from streamlit.components.v1 import html
 
 # ---------------- Default Theme ----------------
@@ -60,7 +60,7 @@ class ChartBuilder:
         legend: bool = True,
         min_slice_percent_for_label: float = 0.7,
         *,
-        auto_rotate: bool = True,            # NEW: rotate to center largest slice at 12 o'clock
+        auto_rotate: bool = True,            # rotate to center largest slice at 12 o'clock
         direction: str = "counterclockwise", # or "clockwise"
     ) -> Figure:
         total = float(df[values].sum() or 0)
@@ -72,7 +72,6 @@ class ChartBuilder:
                 color_discrete_sequence=self.color_theme,
             )
 
-        # Sort so largest is first (deterministic rotation/legend order)
         df_sorted = df.sort_values(values, ascending=False).reset_index(drop=True)
         pct = (df_sorted[values] / total * 100).round(1)
 
@@ -84,26 +83,25 @@ class ChartBuilder:
             color_discrete_sequence=self.color_theme,
         )
 
-        # Compute rotation so largest slice is centered at 12 o'clock
         rotation = 0
         if auto_rotate and len(df_sorted):
             largest = float(df_sorted.loc[0, values])
             ang = 360.0 * (largest / total)
-            rotation = -ang / 2.0  # shift so its center hits 12 o'clock
+            rotation = -ang / 2.0
 
         fig.update_traces(
-            sort=False,                      # keep our sorted order
+            sort=False,
             direction=direction,
             rotation=rotation,
             text=df_sorted[values].astype(str) + " (" + pct.astype(str) + "%)",
             textinfo="text",
-            textposition="auto",             # auto-switch inside/outside
+            textposition="auto",
             textfont=dict(size=14),
             hovertemplate="<b>%{label}</b><br>Count: %{value}<br>Percent: %{percent}<extra></extra>",
             pull=[0.02 if p < min_slice_percent_for_label else 0 for p in pct],
             insidetextorientation="auto",
             marker=dict(line=dict(color="rgba(0,0,0,0)", width=0)),
-            domain=dict(x=[0, 1], y=[0, 0.95]),  # fill more vertical space
+            domain=dict(x=[0, 1], y=[0, 0.95]),
         )
 
         fig.update_layout(
@@ -111,26 +109,23 @@ class ChartBuilder:
             height=420,
             width=None,
             showlegend=bool(legend or pct.lt(min_slice_percent_for_label).any()),
-            legend=dict(
-                orientation="h",
-                y=-0.25,
-                x=0.5,
-                xanchor="center",
-                font=dict(size=13),
-            ),
+            legend=dict(orientation="h", y=-0.25, x=0.5, xanchor="center", font=dict(size=13)),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             margin=dict(t=60, b=60, l=40, r=40),
+            
         )
 
         return fig
 
     # ==============================================================
-    #                           BAR CHART
+    #                    BAR CHART (HORIZONTAL)
     # ==============================================================
 
-    def bar(self, df: pd.DataFrame, x: str, y: str, text: Optional[str] = None,
-            title: str = "", legend=False, height=420) -> Figure:
+    def bar(
+        self, df: pd.DataFrame, x: str, y: str, text: Optional[str] = None,
+        title: str = "", legend: bool = False, height: int = 420
+    ) -> Figure:
         if text is None:
             text = y
         x_max = df[y].max() or 0
@@ -152,7 +147,55 @@ class ChartBuilder:
             margin=dict(t=60, b=60, l=60, r=60),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            height=height
+            height=height,
+          
+        )
+        return fig
+
+    # ==============================================================
+    #                    BAR CHART (VERTICAL)  ← NEW
+    # ==============================================================
+
+    def vbar(
+        self,
+        df: pd.DataFrame,
+        x: str,
+        y: str,
+        text: Optional[str] = None,
+        title: str = "",
+        legend: bool = False,
+        height: int = 420,
+        category_order: Optional[List[str]] = None,
+    ) -> Figure:
+        """
+        Vertical bar chart with outside labels and headroom.
+        Usage: builder.vbar(df, x="Month", y="Surgeries", text="Surgeries", title="Monthly Surgery Trend")
+        """
+        if text is None:
+            text = y
+        y_max = float(df[y].max() or 0)
+        headroom = max(int(y_max * 0.25), 5)
+
+        fig = px.bar(
+            df,
+            x=x,
+            y=y,
+            text=text,
+            color=x,  # color by category (matches style of `bar`)
+            category_orders={x: category_order} if category_order else None,
+            color_discrete_sequence=self.color_theme,
+        )
+        fig.update_traces(textposition="outside", cliponaxis=False)
+        fig.update_yaxes(range=[0, y_max + headroom], showgrid=False, zeroline=False)
+        fig.update_xaxes(showgrid=False, zeroline=False)
+
+        fig.update_layout(
+            showlegend=legend,
+            margin=dict(t=60, b=60, l=40, r=40),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            height=height,
+            
         )
         return fig
 

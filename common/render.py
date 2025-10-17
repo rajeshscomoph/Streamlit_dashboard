@@ -62,7 +62,7 @@ def render_distribution(
         _show_chart(container, title, fig)
         return
 
-    # Pie/Bar paths
+    # Pie/Bar/vbar paths
     counts = custom_counts(df_all, df_present, col) if callable(custom_counts) else category_counts_present(
         df_all,
         df_present,
@@ -77,15 +77,36 @@ def render_distribution(
             st.warning(warn_text or f"No {title.lower()} data available.")
         return
 
+    # Horizontal bar: sort by Count desc (ranked view)
     if kind == "bar":
         df_chart = df_chart.sort_values("Count", ascending=False).reset_index(drop=True)
         df_chart["Category"] = pd.Categorical(df_chart["Category"], categories=df_chart["Category"], ordered=True)
         if bar_with_labels and "Label" not in df_chart:
             df_chart = add_bar_labels(df_chart)
         fig = chart_func(df_chart, "Category", "Count", df_chart.get("Label"), title)
-    else:
-        fig = chart_func(df_chart, "Count", "Category", title)
+        _show_chart(container, title, fig)
+        return
 
+    # Vertical bar (vbar): preserve incoming order (great for months)
+    if kind == "vbar":
+        # keep original order from counts; ensure categorical to lock axis order
+        df_chart = df_chart.reset_index(drop=True)
+        cat_order = df_chart["Category"].tolist()
+        df_chart["Category"] = pd.Categorical(df_chart["Category"], categories=cat_order, ordered=True)
+        # optional bar labels
+        label_series = df_chart.get("Label")
+        if bar_with_labels and label_series is None:
+            # add_bar_labels works fine for vertical too; provides 'Label' column
+            df_chart = add_bar_labels(df_chart)
+            label_series = df_chart.get("Label")
+        # pass category_order via chart_kwargs (builder.vbar supports it)
+        ck = {"category_order": cat_order, **chart_kwargs}
+        fig = chart_func(df_chart, x="Category", y="Count", text=label_series if label_series is not None else "Count", title=title, **ck)
+        _show_chart(container, title, fig)
+        return
+
+    # Default: pie
+    fig = chart_func(df_chart, "Count", "Category", title)
     _show_chart(container, title, fig)
 
 # ---- render multiple charts ----
