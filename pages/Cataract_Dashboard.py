@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from common.Chart_builder import builder
-from common.helper import metric_card, inject_global_dataframe_css
+from common.helper import is_done, metric_card, inject_global_dataframe_css, render_metric_cards
 from common.render import render_many
 from common import config
 from common.dynamic_sidebar import dynamic_sidebar_filters
@@ -47,12 +47,6 @@ config.render_page_header(
     show_filters_heading=True,
 )
 
-# Helpers
-def is_done(val):
-    if pd.isna(val): return False
-    if isinstance(val, (bool, int, float)): return bool(val)
-    return str(val).strip().lower() in {"yes","y","true","1"}
-
 def count_done(col):
     return f[col].apply(is_done).sum() if col in f.columns else 0
 
@@ -71,34 +65,17 @@ def mf_table(col_name: str) -> pd.DataFrame:
         t[s] = t[s].astype(str) + " (" + (t[s] / t["Total"] * 100).round(1).astype(str) + "%)"
     return t.reset_index().rename(columns={cluster: "Vision Centre"})
 
-# Key Metrics
-st.markdown("---")
-st.subheader("📌 Key Metrics")
-
 metrics = {
     "🩺 Surgery Done": ("cataractsx", None),
     "🕶️ Bilateral Blind Operated": ("bilateral", "cataractsx"),
     "🔁 Follow-up Done": ("followdone", "cataractsx"),
     "👁️ Visual Acuity in Operated Eye ≥ 6/18": ("bcvaf618", "followdone"),
 }
-sex_col = RES.get("sex")
-cols = st.columns(len(metrics))
 
-for col_block, (title, (col_name, base_col)) in zip(cols, metrics.items()):
-    with col_block:
-        val = count_done(col_name)
-        help_txt = ""
-        if sex_col and sex_col in f.columns and col_name in f.columns:
-            done_data = f[f[col_name].apply(is_done)]
-            if not done_data.empty:
-                s = done_data[sex_col].astype(str).str.strip().str.lower()
-                m = s.isin({"male","m","man","boy"}).sum()
-                w = s.isin({"female","f","woman","girl"}).sum()
-                help_txt = f"M:{m} | F:{w}"
-        if base_col:
-            base_val = count_done(base_col)
-            val = f"{val} ({(val/base_val*100 if base_val else 0):.1f}%)"
-        metric_card(title, val, help_text=help_txt)
+st.markdown("---")
+st.subheader("📌 Key Metrics")
+render_metric_cards(metrics, df=f, res=RES)  # optional: columns=st.columns(len(metrics))
+
 
 # Monthly Surgery Trend (vbar via render_many)
 st.markdown("---")

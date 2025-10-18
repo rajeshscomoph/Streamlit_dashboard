@@ -1,6 +1,8 @@
+from datetime import date
 import pandas as pd
 import numpy as np
 from typing import Optional, Set
+import streamlit as st
 
 # -------------------- Date utils --------------------
 def to_datetime_safe(series) -> pd.Series:
@@ -85,13 +87,65 @@ box-shadow:0 1px 1.5px rgba(2,6,23,.06),0 8px 18px rgba(2,6,23,.04);">
 </div>
 """
     try:
-        import streamlit as st
         if container and hasattr(container, "markdown"):
             container.markdown(html, unsafe_allow_html=True)
         else:
             st.markdown(html, unsafe_allow_html=True)
     except Exception:
         pass
+
+# Helpers
+def is_done(val):
+    if pd.isna(val): return False
+    if isinstance(val, (bool, int, float,date)): return bool(val)
+    return str(val).strip().lower() in {"yes","y","true","1"}
+
+def render_metric_cards(
+    metrics: dict[str, tuple[str, str | None]],
+    df: pd.DataFrame,
+    res: dict,
+    *,
+    is_done_fn=is_done,
+    metric_card_fn=metric_card,
+    columns=None
+) -> None:
+    """
+    Render metric cards from a spec dict:
+      metrics = { "Title": (col_name, base_col_or_None), ... }
+
+    - Shows total count per metric.
+    - If base_col is provided, shows 'count (pct%)' where pct = count/base*100.
+    - If a sex column exists, adds help_text 'M:x | F:y'.
+    """
+    sex_col = res.get("sex")
+    # Optional: use provided columns layout, else auto-create
+    cols = columns or st.columns(len(metrics))
+
+    def _count_done(col: str) -> int:
+        return df[col].apply(is_done_fn).sum() if col in df.columns else 0
+
+    for col_block, (title, (col_name, base_col)) in zip(cols, metrics.items()):
+        with col_block:
+            # main value
+            val = _count_done(col_name)
+            # gender breakdown
+            help_txt = ""
+            if sex_col and sex_col in df.columns and col_name in df.columns:
+                done_data = df[df[col_name].apply(is_done_fn)]
+                if not done_data.empty:
+                    s = done_data[sex_col].astype(str).str.strip().str.lower()
+                    m = int(s.isin({"male","m","man","boy"}).sum())
+                    w = int(s.isin({"female","f","woman","girl"}).sum())
+                    help_txt = f"M:{m} | F:{w}"
+
+            # percentage vs base (if provided)
+            display_val = val
+            if base_col:
+                base_val = _count_done(base_col)
+                pct = (val / base_val * 100.0) if base_val else 0.0
+                display_val = f"{val} ({pct:.1f}%)"
+
+            metric_card_fn(title, display_val, help_text=help_txt)
 
 # -------------------- Global dataframe CSS --------------------
 _DATAFRAME_CSS = """

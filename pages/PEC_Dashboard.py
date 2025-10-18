@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from common.Chart_builder import builder
-from common.helper import inject_global_dataframe_css, metric_card
+from common.helper import inject_global_dataframe_css, render_metric_cards
 from common.render import render_many
 from common import config
 from common.dynamic_sidebar import dynamic_sidebar_filters
@@ -45,7 +45,6 @@ df, RES = config.load_df_or_stop(DATA_PATH, SHEET, candidates=CANDIDATES, date_k
 YES = {"y", "yes", "true", "t", "1", "present", "referred", "done", "given", "issued", "booked"}
 UNIFORM_H = 260
 TABLE_HEIGHT = 260
-
 sex_col = RES.get("sex")
 
 def col_ok(key: str):
@@ -53,46 +52,40 @@ def col_ok(key: str):
     return c if (c in df.columns) else None
 
 def yes_like(s: pd.Series) -> pd.Series:
-    if s is None:
-        return pd.Series([], dtype=bool)
+    if s is None: return pd.Series([], dtype=bool)
     return s.astype(str).str.strip().str.lower().isin(YES)
 
 def normalize_sex(s: pd.Series) -> pd.Series:
-    if s is None:
-        return pd.Series([], dtype="string")
+    if s is None: return pd.Series([], dtype="string")
     z = s.astype("string").str.strip().str.lower().replace({
-        "m": "male", "male": "male", "man": "male", "boy": "male",
-        "f": "female", "female": "female", "woman": "female", "girl": "female",
+        "m": "male","male": "male","man": "male","boy": "male",
+        "f": "female","female": "female","woman": "female","girl": "female",
     })
-    return z.map({"male": "Male", "female": "Female"})
+    return z.map({"male": "Male","female": "Female"})
 
 def rm(charts, data):
-    """Safe render_many: drops charts with missing/None col."""
     cleaned = [c for c in charts if c.get("col")]
-    if cleaned:
-        render_many(cleaned, data, data)
+    if cleaned: render_many(cleaned, data, data)
 
 def mf_table(df_in: pd.DataFrame, by: str, label: str, order=None, mask=None) -> pd.DataFrame:
     cols = [label, "Male", "Female", "Total"]
     if df_in.empty or not by or by not in df_in.columns or sex_col not in df_in.columns:
         return pd.DataFrame(columns=cols)
     d = (df_in.loc[mask] if mask is not None else df_in).copy()
-    if d.empty:
-        return pd.DataFrame(columns=cols)
+    if d.empty: return pd.DataFrame(columns=cols)
     d["_sex"] = normalize_sex(d[sex_col]).dropna()
     if d["_sex"].empty:
         base = order or sorted(d[by].dropna().unique())
         return pd.DataFrame({label: base, "Male": 0, "Female": 0, "Total": 0})
     row_order = order or sorted(d[by].dropna().unique())
-    ct = pd.crosstab(d[by], d["_sex"]).reindex(columns=["Male", "Female"], fill_value=0)
+    ct = pd.crosstab(d[by], d["_sex"]).reindex(columns=["Male","Female"], fill_value=0)
     ct = ct.reindex(pd.Index(row_order, name=by), fill_value=0)
     ct["Total"] = ct.sum(axis=1)
     return ct.reset_index().rename(columns={by: label})
 
 def add_row_pct_compact(df_tbl: pd.DataFrame, label_col: str) -> pd.DataFrame:
     need = {label_col, "Male", "Female", "Total"}
-    if df_tbl.empty or not need.issubset(df_tbl.columns):
-        return df_tbl
+    if df_tbl.empty or not need.issubset(df_tbl.columns): return df_tbl
     out = df_tbl.copy()
     denom = out["Total"].replace(0, pd.NA)
     male_pct = (out["Male"] / denom * 100).round(1).fillna(0)
@@ -104,8 +97,7 @@ def add_row_pct_compact(df_tbl: pd.DataFrame, label_col: str) -> pd.DataFrame:
     return out[[c for c in [label_col, "Male", "Female", "Total"] if c in out.columns]]
 
 def clean_label_rows(df_tbl: pd.DataFrame, label_col: str) -> pd.DataFrame:
-    if df_tbl.empty or label_col not in df_tbl.columns:
-        return df_tbl
+    if df_tbl.empty or label_col not in df_tbl.columns: return df_tbl
     bad = df_tbl[label_col].astype(str).str.strip().str.lower().isin(("", "nan", "none"))
     return df_tbl.loc[~bad].copy()
 
@@ -132,42 +124,15 @@ config.render_page_header(
 )
 
 # ========== Key Metrics ==========
+metrics = {
+    "🩺 Total Screened": ("date", None),
+    "👓 Spectacles Prescribed": ("specpres", "date"),
+    "📘 Spectacles Dispensed": ("specbook", "specpres"),
+    "➡️ Referred Patients": ("referred", "date"),
+}
 st.markdown("---")
 st.subheader("📌 Key Metrics")
-
-N = len(F)
-ref_c, pres_c, book_c = col_ok("referred"), col_ok("spec_pres"), col_ok("specbook")
-sex_norm = normalize_sex(F[sex_col]) if (sex_col and sex_col in F.columns) else pd.Series("", index=F.index)
-m_mask, f_mask = sex_norm.eq("Male"), sex_norm.eq("Female")
-
-pres_mask = yes_like(F[pres_c]) if pres_c else pd.Series(False, index=F.index)
-book_mask = yes_like(F[book_c]) if book_c else pd.Series(False, index=F.index)
-ref_mask = yes_like(F[ref_c]) if ref_c else pd.Series(False, index=F.index)
-
-spec_prescribed = int(pres_mask.sum())
-spec_booked = int(book_mask.sum())
-ref_n = int(ref_mask.sum())
-
-c1, c2, c3, c4 = st.columns(4)
-metric_card("Total Screened", f"{N:,}", help_text=f"M:{int(m_mask.sum()):,} | F:{int(f_mask.sum()):,}", icon="🩺", color="#22c55e", container=c1)
-metric_card(
-    "Spectacles Prescribed",
-    f"{spec_prescribed:,} ({spec_prescribed/max(N,1)*100:.1f}%)",
-    help_text=f"M:{int((pres_mask & m_mask).sum()):,} | F:{int((pres_mask & f_mask).sum()):,}",
-    icon="👓", color="#3b82f6", container=c2
-)
-metric_card(
-    "Spectacles Dispensed",
-    f"{spec_booked:,} ({spec_booked/max(N,1)*100:.1f}%)",
-    help_text=f"M:{int((book_mask & m_mask).sum()):,} | F:{int((book_mask & f_mask).sum()):,}",
-    icon="📘", color="#8b5cf6", container=c3
-)
-metric_card(
-    "Referred Patients",
-    f"{ref_n:,} ({ref_n/max(N,1)*100:.1f}%)",
-    help_text=f"M:{int((ref_mask & m_mask).sum()):,} | F:{int((ref_mask & f_mask).sum()):,}",
-    icon="➡️", color="#14b8a6", container=c4
-)
+render_metric_cards(metrics, df=F, res=RES)
 
 # ========== Demographics ==========
 st.markdown("---")
@@ -176,53 +141,40 @@ st.subheader("👨‍👩‍👧 Demographics Screening")
 if F.empty:
     st.info("No data to display with the current filters.")
 else:
-    # First row: Gender, Age & Gender, Better PVA, Need
     d1, d2, d3, d4 = st.columns(4)
     rm([
-        dict(container=d1, col=col_ok("sex"),           title="Gender Distribution",       chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=d2, col=col_ok("agewisesexcat"), title="Age & Gender Distribution", chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=d3, col=col_ok("betterpvacat"),  title="Vision Assessment",         chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=d4, col=col_ok("need"),          title="Spectacle Need",            chart_func=builder.pie, drop_values={"", "nan"}),
+        dict(container=d1, col=col_ok("sex"),           title="Gender Distribution",        chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=d2, col=col_ok("agewisesexcat"), title="Age & Gender Distribution",  chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=d3, col=col_ok("betterpvacat"),  title="Vision Assessment",          chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=d4, col=col_ok("need"),          title="Spectacle Need",             chart_func=builder.pie, drop_values={"","nan"}),
     ], F)
 
-# ========== Second row: New/Old × Sex and Wear Glass × Sex ==========
+# ========== New/Old × Sex and Wear Glass × Sex ==========
 d5, d6 = st.columns(2)
-
-def init_second_row_specs(builder, F, RES, UNIFORM_H):
-    return [
-        {
-            "container": d5,
-            "col": RES.get("no"),
-            "sex_col": RES.get("sex"),
-            "title": "New / Old by Gender",
-            "kind": "grouped_sex",
-            "chart_func": builder.grouped_by_category_and_sex,
-            "normalize_category": builder._normalize_newold_series,
-            "chart_kwargs": {
-                "height": UNIFORM_H,
-                "category_order": ["New", "Old"],
-                "sex_order": ("Male", "Female"),
-            },
-            "info_text": "New/Old by Gender not available.",
-        },
-        {
-            "container": d6,
-            "col": RES.get("wear_glass"),
-            "sex_col": RES.get("sex"),
-            "title": "Wear Glass by Gender",
-            "kind": "grouped_sex",
-            "chart_func": builder.grouped_by_category_and_sex,
-            "normalize_category": lambda s: s.astype("string").str.strip().str.title(),
-            "chart_kwargs": {
-                "height": UNIFORM_H,
-                "category_order": None,
-                "sex_order": ("Male", "Female"),
-            },
-            "info_text": "Wear Glass by Gender not available.",
-        },
-    ]
-
-second_row_specs = init_second_row_specs(builder, F, RES, UNIFORM_H)
+second_row_specs = [
+    {
+        "container": d5,
+        "col": RES.get("no"),
+        "sex_col": RES.get("sex"),
+        "title": "New / Old by Gender",
+        "kind": "grouped_sex",
+        "chart_func": builder.grouped_by_category_and_sex,
+        "normalize_category": builder._normalize_newold_series,
+        "chart_kwargs": {"height": UNIFORM_H, "category_order": ["New","Old"], "sex_order": ("Male","Female")},
+        "info_text": "New/Old by Gender not available.",
+    },
+    {
+        "container": d6,
+        "col": RES.get("wear_glass"),
+        "sex_col": RES.get("sex"),
+        "title": "Wear Glass by Gender",
+        "kind": "grouped_sex",
+        "chart_func": builder.grouped_by_category_and_sex,
+        "normalize_category": lambda s: s.astype("string").str.strip().str.title(),
+        "chart_kwargs": {"height": UNIFORM_H, "category_order": None, "sex_order": ("Male","Female")},
+        "info_text": "Wear Glass by Gender not available.",
+    },
+]
 render_many(second_row_specs, df_all=F, df_present=F)
 
 # ========== Refraction & Spectacles ==========
@@ -232,10 +184,10 @@ st.subheader("👓 Refraction & Spectacles Detail")
 if not F.empty:
     c1, c2, c3, c4 = st.columns(4)
     rm([
-        dict(container=c1, col=col_ok("dry_pmt_dil"),    title="Refraction Type",            chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=c2, col=col_ok("spec_pres"),      title="Spectacles Prescribed",      chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=c3, col=col_ok("spec_pres_type"), title="Prescribed Spectacles Type", chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=c4, col=col_ok("specprice"),      title="Dispensed Spectacles",       chart_func=builder.pie, drop_values={"", "nan"}),
+        dict(container=c1, col=col_ok("dry_pmt_dil"),    title="Refraction Type",             chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=c2, col=col_ok("spec_pres"),      title="Spectacles Prescribed",       chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=c3, col=col_ok("spec_pres_type"), title="Prescribed Spectacles Type",  chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=c4, col=col_ok("specprice"),      title="Dispensed Spectacles",        chart_func=builder.pie, drop_values={"","nan"}),
     ], F)
 
 # ========== WGSS ==========
@@ -245,16 +197,16 @@ st.subheader("🧍 Washington Group Short Set (WGSS)")
 if not F.empty:
     r1c1, r1c2, r1c3 = st.columns(3)
     rm([
-        dict(container=r1c1, col=col_ok("vision"),  title="Vision",      chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=r1c2, col=col_ok("hearing"), title="Hearing",     chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=r1c3, col=col_ok("walking"), title="Walking",     chart_func=builder.pie, drop_values={"", "nan"}),
+        dict(container=r1c1, col=col_ok("vision"),  title="Vision",       chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=r1c2, col=col_ok("hearing"), title="Hearing",      chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=r1c3, col=col_ok("walking"), title="Walking",      chart_func=builder.pie, drop_values={"","nan"}),
     ], F)
 
     r2c1, r2c2, r2c3 = st.columns(3)
     rm([
-        dict(container=r2c1, col=col_ok("remember"),      title="Remembering",   chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=r2c2, col=col_ok("selfcare"),      title="Self Care",     chart_func=builder.pie, drop_values={"", "nan"}),
-        dict(container=r2c3, col=col_ok("communication"), title="Communication", chart_func=builder.pie, drop_values={"", "nan"}),
+        dict(container=r2c1, col=col_ok("remember"),      title="Remembering",   chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=r2c2, col=col_ok("selfcare"),      title="Self Care",     chart_func=builder.pie, drop_values={"","nan"}),
+        dict(container=r2c3, col=col_ok("communication"), title="Communication", chart_func=builder.pie, drop_values={"","nan"}),
     ], F)
 
 # ========== Clinical ==========
@@ -265,17 +217,17 @@ if not F.empty:
     a, b = st.columns([3, 1])
     rm([
         dict(container=a, col=col_ok("diagnosis_code"), title="Screen Patients Diagnosis",
-             chart_func=builder.bar, kind="bar", bar_with_labels=True, drop_values={"", "nan"}),
+             chart_func=builder.bar, kind="bar", bar_with_labels=True, drop_values={"","nan"}),
         dict(container=b, col=col_ok("referred"),       title="Referred Patients",
-             chart_func=builder.pie, drop_values={"", "nan"}),
+             chart_func=builder.pie, drop_values={"","nan"}),
     ], F)
 
     c, d = st.columns(2)
     rm([
         dict(container=c, col=col_ok("ref_dig"), title="Referred Patients Diagnosis",
-             chart_func=builder.bar, kind="bar", bar_with_labels=True, drop_values={"", "nan"}),
+             chart_func=builder.bar, kind="bar", bar_with_labels=True, drop_values={"","nan"}),
         dict(container=d, col=col_ok("clinic"),  title="Referred Clinic",
-             chart_func=builder.bar, kind="bar", bar_with_labels=True, drop_values={"", "nan"}),
+             chart_func=builder.bar, kind="bar", bar_with_labels=True, drop_values={"","nan"}),
     ], F)
 
 # ========== Sex-wise Tables ==========
@@ -283,26 +235,26 @@ st.markdown("---")
 st.subheader("📋 Sex-wise Tables")
 
 pec_c, clus_c, ref_c = col_ok("pec"), col_ok("cluster"), col_ok("referred")
-team_order = sorted(F[pec_c].dropna().unique()) if (pec_c and not F.empty) else []
+team_order    = sorted(F[pec_c].dropna().unique())  if (pec_c and not F.empty)  else []
 vcentre_order = sorted(F[clus_c].dropna().unique()) if (clus_c and not F.empty) else []
 
-team_df = mf_table(F, pec_c, "Team", order=team_order) if (pec_c and sex_col in F.columns) else pd.DataFrame(columns=["Team", "Male", "Female", "Total"])
-vc_df = mf_table(F, clus_c, "Vision Centre", order=vcentre_order) if (clus_c and sex_col in F.columns) else pd.DataFrame(columns=["Vision Centre", "Male", "Female", "Total"])
-ref_df = mf_table(F, clus_c, "Vision Centre", mask=yes_like(F[ref_c]) if ref_c else None, order=vcentre_order) if (clus_c and sex_col in F.columns and ref_c) else pd.DataFrame(columns=["Vision Centre", "Male", "Female", "Total"])
+team_df = mf_table(F, pec_c, "Team", order=team_order) if (pec_c and sex_col in F.columns) else pd.DataFrame(columns=["Team","Male","Female","Total"])
+vc_df   = mf_table(F, clus_c, "Vision Centre", order=vcentre_order) if (clus_c and sex_col in F.columns) else pd.DataFrame(columns=["Vision Centre","Male","Female","Total"])
+ref_df  = mf_table(F, clus_c, "Vision Centre", mask=yes_like(F[ref_c]) if ref_c else None, order=vcentre_order) if (clus_c and sex_col in F.columns and ref_c) else pd.DataFrame(columns=["Vision Centre","Male","Female","Total"])
 
 team_df_viz = add_row_pct_compact(team_df, "Team")
-vc_df_viz = add_row_pct_compact(vc_df, "Vision Centre")
-ref_df_viz = add_row_pct_compact(ref_df, "Vision Centre")
+vc_df_viz   = add_row_pct_compact(vc_df, "Vision Centre")
+ref_df_viz  = add_row_pct_compact(ref_df, "Vision Centre")
 
 diag_c, refdig_c, clinic_c = col_ok("diagnosis_code"), col_ok("ref_dig"), col_ok("clinic")
-diag_df = mf_table(F, diag_c, "Diagnosis", order=None) if (diag_c and sex_col in F.columns) else pd.DataFrame(columns=["Diagnosis", "Male", "Female", "Total"])
-refdig_df = mf_table(F, refdig_c, "Referred Diagnosis", order=None) if (refdig_c and sex_col in F.columns) else pd.DataFrame(columns=["Referred Diagnosis", "Male", "Female", "Total"])
-clinic_df = mf_table(F, clinic_c, "Clinic", order=None) if (clinic_c and sex_col in F.columns) else pd.DataFrame(columns=["Clinic", "Male", "Female", "Total"])
+diag_df   = mf_table(F, diag_c, "Diagnosis", order=None) if (diag_c and sex_col in F.columns) else pd.DataFrame(columns=["Diagnosis","Male","Female","Total"])
+refdig_df = mf_table(F, refdig_c, "Referred Diagnosis", order=None) if (refdig_c and sex_col in F.columns) else pd.DataFrame(columns=["Referred Diagnosis","Male","Female","Total"])
+clinic_df = mf_table(F, clinic_c, "Clinic", order=None) if (clinic_c and sex_col in F.columns) else pd.DataFrame(columns=["Clinic","Male","Female","Total"])
 
-if not diag_df.empty and {"Diagnosis", "Total"}.issubset(diag_df.columns):
+if not diag_df.empty and {"Diagnosis","Total"}.issubset(diag_df.columns):
     diag_df = (
         diag_df.assign(_tail=is_tail_label(diag_df["Diagnosis"]))
-               .sort_values(by=["_tail", "Total", "Diagnosis"], ascending=[True, False, True], kind="mergesort")
+               .sort_values(by=["_tail","Total","Diagnosis"], ascending=[True,False,True], kind="mergesort")
                .drop(columns=["_tail"])
                .reset_index(drop=True)
     )
@@ -310,11 +262,10 @@ if not diag_df.empty and {"Diagnosis", "Total"}.issubset(diag_df.columns):
 refdig_df_clean = clean_label_rows(refdig_df, "Referred Diagnosis")
 clinic_df_clean = clean_label_rows(clinic_df, "Clinic")
 
-diag_df_compact = add_row_pct_compact(diag_df, "Diagnosis")
+diag_df_compact   = add_row_pct_compact(diag_df, "Diagnosis")
 refdig_df_compact = add_row_pct_compact(refdig_df_clean, "Referred Diagnosis")
 clinic_df_compact = add_row_pct_compact(clinic_df_clean, "Clinic")
 
-# Layout: 2 rows
 r1c1, r1c2 = st.columns(2)
 with r1c1:
     st.markdown("#### 🧾 Diagnosis (All)")
